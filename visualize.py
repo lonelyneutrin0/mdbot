@@ -28,7 +28,8 @@ def to_thread(func: typing.Callable) -> typing.Coroutine:
 class Scenario(Enum):
 
     TWO_PHASE_COPPER = 0
-    SOMETHING_ELSE = 1
+    POUR = 1
+    SOMETHING_ELSE = 2
 
 
 class AvailableRenderer(Enum):
@@ -129,6 +130,66 @@ class TwoPhaseCopper(Simulation):
 
         return Path(f"copy_{file_name}")
     
+@dataclass
+class Pour(Simulation): 
+    """
+    Pouring of granular particles into a 3d box, then chute flow
+    """
+    def get_description(self, values: dict) -> str:
+        with Path("simulations/pour/description.txt").open("r") as file:
+            template = Template(file.read())
+
+        return template.substitute(**values)
+    
+    @to_thread
+    def run(self, temperature: float) -> Path:
+        output_file_name = "pour_output"
+        os.chdir("simulations/pour")
+        subprocess.call(["lmp", "-in", "pour.in", "-log", "none"])
+        subprocess.call(["gzip", "-f", f"{output_file_name}.dump"])
+        os.chdir("../..")
+
+        # should be calling LAMMPS here, just use preset simulations for now
+
+        return Path(f"simulations/copper/{output_file_name}.dump.gz")
+    
+    def render(self, path: Path, renderer: ovito.nonpublic.SceneRenderer) -> Path:
+
+        pipeline = ovito.io.import_file(path)
+        pipeline.add_to_scene()
+
+        viewport = ovito.vis.Viewport(
+            type=ovito.vis.Viewport.Type.Front,
+            camera_pos=(-0.00376349, 0.00141782, 0.00535878),
+            camera_dir=(0.0, 0.0, 1.0),
+            camera_up=(1.0, 0.0, 0.0),
+            fov=24.8456
+        )
+
+        # temp file name
+        file_name = "animation.mp4"
+
+        viewport.render_anim(
+            filename=file_name,
+            size=(640, 480),
+            background=(49 / 255, 51 / 255, 56 / 255),
+            renderer=renderer
+        )
+        
+        # need to re-encode
+        # thanks ChatGPT
+        
+        ffmpeg.input(file_name).output(
+            f"copy_{file_name}",
+            vcodec="libx264",     # Video codec: H.264
+            acodec="aac",         # Audio codec: AAC
+            audio_bitrate="192k", # Audio bitrate (optional)
+            movflags="faststart"  # Optimize for web streaming
+        ).run(overwrite_output=True)
+
+        Path(file_name).unlink()
+
+        return Path(f"copy_{file_name}")
 
 @dataclass
 class SomethingElse(Simulation):
@@ -149,6 +210,7 @@ class SomethingElse(Simulation):
 
 MAPPING = {
     Scenario.TWO_PHASE_COPPER: TwoPhaseCopper(),
+    Scenario.POUR: Pour(),
     Scenario.SOMETHING_ELSE: SomethingElse()
 }
 

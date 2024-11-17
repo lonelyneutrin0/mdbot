@@ -78,10 +78,10 @@ class TwoPhaseCopper(Simulation):
             template = Template(file.read())
 
         return template.substitute(**values)
-
+    
     @to_thread
     def run(self, temperature: float) -> Path:
-
+        
         os.chdir("simulations/copper")
         subprocess.call(["lmp", "-in", "copper.in", "-var", "temperature", f"{temperature:.0f}", "-log", "none"])
         subprocess.call(["gzip", "-f", f"equil_{temperature:.0f}.dump"])
@@ -159,13 +159,13 @@ RENDERERS = {
 
 
 def main():
-
+    
     config = dotenv_values(".env")
 
     intents = discord.Intents.all()
     bot = commands.Bot(command_prefix="!", intents=intents)
     guild = bot.get_guild(config["GUILD_ID"])
-
+    
     @bot.event
     async def on_ready():
 
@@ -207,7 +207,12 @@ def main():
         dump_file_path.unlink()
         animation_path.unlink()
         return
-
+    
+    @bot.tree.command(name="hello", guild=guild)
+    async def hello(
+        interaction: discord.Interaction
+    ): 
+        await interaction.response.send_message("Hello World")
     bot.run(config["API_KEY"])
 
 

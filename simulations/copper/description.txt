@@ -1,5 +1,5 @@
 This is a simulation of two phase copper, where the left side is solid and the right side is liquid.
 This configuration is achieved by creating a perfect crystal, and then equilibrating the solid side at 300 K and the liquid side at 3000 K.
-Then, we run [Langevin dynamics](https://en.wikipedia.org/wiki/Langevin_dynamics) and a [copper force field](https://doi.org/10.1103/PhysRevB.69.144113) for 20 picoseconds at $temperature K.
+Then, we run [Langevin dynamics](https://en.wikipedia.org/wiki/Langevin_dynamics) and a [copper force field](https://doi.org/10.1103/PhysRevB.69.144113) for 20 picoseconds at $temperature K. The color of each particle is a representation of its relative temperature-darker particles are hotter, and have more kinetic energy.
 Below the melting point, the solid phase eats the liquid phase. Above the melting point, the liquid phase swallows the solid phase.
 This kind of simulation lets you then calculate the melting point! Super cool :)

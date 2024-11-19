@@ -17,7 +17,7 @@ create_atoms 1 box
 pair_style eam/alloy
 pair_coeff * * copper.eam.alloy Cu
 
-# equilibrate
+# Equilibration
 min_style cg
 min_modify dmax 1.0e-2 line quadratic
 fix min all box/relax aniso 0.0 vmax 0.01
@@ -39,9 +39,13 @@ run 5000
 unfix nptLiquid
 unfix recenterFix
 
+# Define compute for kinetic energy per particle
+compute ke all ke/atom
+
+# Main NPT run with temperature and kinetic energy dump
 fix nptFix all npt temp ${temperature} ${temperature} $(100.0*dt) iso ${pressure} ${pressure} $(1000.0*dt)
 fix recenterFix all recenter INIT INIT INIT
-dump equilibration all atom 100 equil_${temperature}.dump
+dump equilibration all custom 100 equil_${temperature}.dump id type x y z c_ke
 reset_timestep 0
 run 20000
 unfix nptFix

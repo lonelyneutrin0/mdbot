@@ -3,19 +3,15 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from pathlib import Path
 import os
+import numpy as np
 import subprocess
 import typing
 import functools
 import asyncio
 from string import Template
-
 import ovito
-from dotenv import dotenv_values
-import discord
-from discord.ext import commands
-from discord import app_commands
-from dotenv import dotenv_values
 import ffmpeg
+
 
 
 def to_thread(func: typing.Callable) -> typing.Coroutine:
@@ -28,7 +24,8 @@ def to_thread(func: typing.Callable) -> typing.Coroutine:
 class Scenario(Enum):
 
     TWO_PHASE_COPPER = 0
-    SOMETHING_ELSE = 1
+    POUR = 1
+    SOMETHING_ELSE = 2
 
 
 class AvailableRenderer(Enum):
@@ -78,10 +75,10 @@ class TwoPhaseCopper(Simulation):
             template = Template(file.read())
 
         return template.substitute(**values)
-
+    
     @to_thread
     def run(self, temperature: float) -> Path:
-
+        
         os.chdir("simulations/copper")
         subprocess.call(["lmp", "-in", "copper.in", "-var", "temperature", f"{temperature:.0f}", "-log", "none"])
         subprocess.call(["gzip", "-f", f"equil_{temperature:.0f}.dump"])
@@ -94,6 +91,14 @@ class TwoPhaseCopper(Simulation):
     def render(self, path: Path, renderer: ovito.nonpublic.SceneRenderer) -> Path:
 
         pipeline = ovito.io.import_file(path)
+        data_initial = pipeline.compute(1)
+        energies = np.array(data_initial.particles["c_ke"][...])
+        pipeline.modifiers.append(ovito.modifiers.ColorCodingModifier(
+          property = 'c_ke',
+          gradient = ovito.modifiers.ColorCodingModifier.Magma(),
+          start_value = 1.5,
+          end_value = 2.2799e-5
+        ))
         pipeline.add_to_scene()
     
         viewport = ovito.vis.Viewport(
@@ -129,6 +134,74 @@ class TwoPhaseCopper(Simulation):
 
         return Path(f"copy_{file_name}")
     
+@dataclass
+class Pour(Simulation): 
+    """
+    Pouring of granular particles into a 3d box, then chute flow
+    """
+    def get_description(self, values: dict) -> str:
+        with Path("simulations/pour/description.txt").open("r") as file:
+            template = Template(file.read())
+
+        return template.substitute(**values)
+    
+    @to_thread
+    def run(self, temperature: float) -> Path:
+        output_file_name = "pour_output"
+        os.chdir("simulations/pour")
+        subprocess.call(["lmp", "-in", "pour.in", "-log", "none", "-var", "dump_file", f"{output_file_name}.dump"])
+        subprocess.call(["gzip", "-f", f"{output_file_name}.dump"])
+        os.chdir("../..")
+
+        # should be calling LAMMPS here, just use preset simulations for now
+
+        return Path(f"simulations/pour/{output_file_name}.dump.gz")
+        
+    @staticmethod
+    def change_radius(frame: int, data: ovito.data.DataCollection) -> None:
+        if(data.particles_.count == 0): return
+        radius: float = 0.5
+        types = data.particles_.particle_types_
+        types.type_by_id_(1).radius = radius
+        
+    def render(self, path: Path, renderer: ovito.nonpublic.SceneRenderer) -> Path:
+
+        pipeline = ovito.io.import_file(path)
+        pipeline.modifiers.append(self.change_radius)
+        pipeline.add_to_scene()
+
+        viewport = ovito.vis.Viewport(
+            type=ovito.vis.Viewport.Type.Right,
+            camera_pos=(0, 0, 7.75),
+            camera_dir = (-1, 0, 0),  # Direction the camera is looking
+            camera_up = (0, 0, 1),
+            fov=9.075
+        )
+
+        # temp file name
+        file_name = "animation.mp4"
+
+        viewport.render_anim(
+            filename=file_name,
+            size=(640, 480),
+            background=(49 / 255, 51 / 255, 56 / 255),
+            renderer=renderer
+        )
+        
+        # need to re-encode
+        # thanks ChatGPT
+        
+        ffmpeg.input(file_name).output(
+            f"copy_{file_name}",
+            vcodec="libx264",     # Video codec: H.264
+            acodec="aac",         # Audio codec: AAC
+            audio_bitrate="192k", # Audio bitrate (optional)
+            movflags="faststart"  # Optimize for web streaming
+        ).run(overwrite_output=True)
+
+        Path(file_name).unlink()
+
+        return Path(f"copy_{file_name}")
 
 @dataclass
 class SomethingElse(Simulation):
@@ -145,72 +218,3 @@ class SomethingElse(Simulation):
     def render(path: Path, renderer: ovito.nonpublic.SceneRenderer) -> Path:
 
         raise NotImplementedError
-    
-
-MAPPING = {
-    Scenario.TWO_PHASE_COPPER: TwoPhaseCopper(),
-    Scenario.SOMETHING_ELSE: SomethingElse()
-}
-
-RENDERERS = {
-    AvailableRenderer.OPENGL: ovito.vis.OpenGLRenderer(),
-    AvailableRenderer.TACHYON: ovito.vis.TachyonRenderer()
-}
-
-
-def main():
-
-    config = dotenv_values(".env")
-
-    intents = discord.Intents.all()
-    bot = commands.Bot(command_prefix="!", intents=intents)
-    guild = bot.get_guild(config["GUILD_ID"])
-
-    @bot.event
-    async def on_ready():
-
-        await bot.tree.sync(guild=guild)
-
-    @bot.tree.command(name="render", guild=guild)
-    @app_commands.describe(
-        scenario="Choice from available simulations",
-        temperature="Temperature in Celsius",
-        renderer="Renderer to choose. Tachyon has ambient occlusion"
-    )
-    @app_commands.choices(
-        scenario=[app_commands.Choice(name=x.name, value=x.value) for x in Scenario],
-        renderer=[
-            app_commands.Choice(name="OpenGL (faster)", value=AvailableRenderer.OPENGL.value),
-            app_commands.Choice(name="Tachyon (prettier)", value=AvailableRenderer.TACHYON.value)
-        ]
-    )
-    async def render(
-        interaction: discord.Interaction,
-        scenario: Scenario,
-        temperature: app_commands.Range[float, 700.0, 1800.0],
-        renderer: AvailableRenderer
-    ):
-
-        temperature += 273.15
-        channel = bot.get_channel(interaction.channel_id)
-
-        simulation = MAPPING[scenario]
-        await interaction.response.send_message(content="Running the simulation... Give me a bit of time :)")
-        message = await interaction.original_response()
-        dump_file_path = await simulation.run(temperature)
-        await message.edit(content="Simulation ran successfully! Now I have to render it... Some more time please! :D")
-        animation_path = simulation.render(dump_file_path, renderer=RENDERERS[renderer])
-
-        file = discord.File(animation_path.name, filename=animation_path.name)
-        description = simulation.get_description({"temperature": temperature})
-        await channel.send(f"Your render is done <@{interaction.user.id}>! {description}", file=file)
-        dump_file_path.unlink()
-        animation_path.unlink()
-        return
-
-    bot.run(config["API_KEY"])
-
-
-if __name__ == "__main__":
-
-    main()

@@ -3,7 +3,7 @@ echo both
 units		metal
 atom_style	atomic
 
-variable low_temperature equal 300
+variable low_temperature equal 0
 variable high_temperature equal 3000
 variable pressure equal 0
 
@@ -33,12 +33,10 @@ thermo 100
 velocity liquid create ${high_temperature} 123456 dist gaussian
 velocity solid create ${low_temperature} 123456 dist gaussian
 fix nptLiquid liquid npt temp ${high_temperature} ${high_temperature} $(100.0*dt) iso ${pressure} ${pressure} $(1000.0*dt)
-fix nptSolid solid npt temp ${low_temperature} ${low_temperature} $(100.0*dt) iso ${pressure} ${pressure} $(1000.0*dt)
 fix recenterFix all recenter INIT INIT INIT
 reset_timestep 0
 run 5000
 unfix nptLiquid
-unfix nptSolid
 unfix recenterFix
 
 # Define compute for kinetic energy per particle

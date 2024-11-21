@@ -27,7 +27,6 @@ class Scenario(Enum):
     POUR = 1
     SOMETHING_ELSE = 2
 
-
 class AvailableRenderer(Enum):
 
     OPENGL = 0

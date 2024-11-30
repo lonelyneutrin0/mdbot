@@ -1,5 +1,6 @@
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Tuple, Dict
 from abc import ABC, abstractmethod
 from pathlib import Path
 import os
@@ -35,6 +36,8 @@ class AvailableRenderer(Enum):
 
 @dataclass
 class Simulation(ABC):
+    
+    restrictions: Dict[str, Tuple[float, float]]=field(default_factory=dict)
 
     @abstractmethod
     def get_description(self, values: dict) -> str:
@@ -44,7 +47,7 @@ class Simulation(ABC):
         """
 
         pass
-
+    
     @abstractmethod
     @to_thread
     def run(self, temperature: float) -> Path:
@@ -67,7 +70,6 @@ class Simulation(ABC):
 
 @dataclass
 class TwoPhaseCopper(Simulation):
-
     def get_description(self, values: dict) -> str:
 
         with Path("simulations/copper/description.txt").open("r") as file:
@@ -145,7 +147,7 @@ class Pour(Simulation):
         return template.substitute(**values)
     
     @to_thread
-    def run(self, temperature: float) -> Path:
+    def run(self) -> Path:
         output_file_name = "pour_output"
         os.chdir("simulations/pour")
         subprocess.call(["lmp", "-in", "pour.in", "-log", "none", "-var", "dump_file", f"{output_file_name}.dump"])

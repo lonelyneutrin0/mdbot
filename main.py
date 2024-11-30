@@ -20,7 +20,7 @@ import ffmpeg
 import asyncio 
 
 MAPPING = {
-    Scenario.TWO_PHASE_COPPER: TwoPhaseCopper(),
+    Scenario.TWO_PHASE_COPPER: TwoPhaseCopper(restrictions = {"temperature": (700, 1800)}),
     Scenario.POUR: Pour(),
     Scenario.SOMETHING_ELSE: SomethingElse()
 }
@@ -32,7 +32,7 @@ RENDERERS = {
 
 PARAMS = { 
     Scenario.TWO_PHASE_COPPER: [{"label": "Temperature", "placeholder": "Enter the temperature in Celsius [700-1800]."}],
-    Scenario.POUR: [{"label": "Radius", "placeholder": "Enter the radius of the particles."}],
+    Scenario.POUR: [],
     Scenario.SOMETHING_ELSE: [{"label": "NULL", "placeholder": "NULL"}]
 }
 # class DropdownMenu(Select):
@@ -58,7 +58,7 @@ PARAMS = {
 
 # Modal class
 class Modal(discord.ui.Modal):
-    def __init__(self, components: list[dict], future_responses: asyncio.Future):
+    def __init__(self, components: list[dict], future_responses: asyncio.Future, simulation: Scenario):
         super().__init__(title="Simulation Query")
 
         # Dynamically create text input fields
@@ -69,12 +69,21 @@ class Modal(discord.ui.Modal):
                 required=component.get("required", True),
             )
             self.add_item(input_field)
-        self.future_responses = future_responses    
-
+        self.future_responses = future_responses   
+        self.simulation = MAPPING[simulation] 
+    
     async def on_submit(self, interaction: discord.Interaction):
         # Collect all responses from the modal
-        responses = {item.label.lower(): (float) (item.value) for item in self.children if isinstance(item, discord.ui.TextInput)}
-        self.future_responses.set_result(responses)
+        responses = {item.label.lower(): (float) (item.value) for item in self.children if isinstance(item, discord.ui.TextInput)}  
+        
+        # Data Validation
+        if len(self.simulation.restrictions) > 0: 
+            for i in responses: 
+                if not (self.simulation.restrictions[i][0] <= responses[i] <= self.simulation.restrictions[i][1]): 
+                    return ValueError( await interaction.response.send_message(f"You entered an invalid value! Please enter a {i} value between {self.simulation.restrictions[i][0]} and {self.simulation.restrictions[i][1]}"))
+        
+        # Push the validated options to a asyncio object- handle in the main render function
+        self.future_responses.set_result(responses)        
         await interaction.response.send_message("Your responses have been submitted!", ephemeral=True)
 
 
@@ -108,12 +117,28 @@ def main():
         scenario: Scenario,
         renderer: AvailableRenderer
     ):
-        param_responses = asyncio.Future()
-        modal = Modal(components=PARAMS[scenario], future_responses=param_responses)
-        await interaction.response.send_modal(modal)
-        await param_responses    
-        params = param_responses.result()
-        params['temperature'] += 273.15
+        # params should default to an empty dict (for simulations that don't accept parameters)
+        params = {}
+        
+        # Send a modal if the simulation takes parameters
+        if len(PARAMS[scenario]) > 0:
+
+            # Store the parameters in an asyncio.Future variable
+            param_responses = asyncio.Future()
+            modal = Modal(components=PARAMS[scenario], future_responses=param_responses, simulation = scenario)
+            await interaction.response.send_modal(modal)
+            await param_responses    
+            params = param_responses.result()
+
+            # Check the validity of the parameters
+            if(params is None): return
+        else: 
+            message = await interaction.response.send_message(content="Querying....", ephemeral=True)
+
+        # Convert temp to Kelvin for the TWO_PHASE_COPPER simulation || We can put other simulation-specific unit conversions here
+        if scenario == Scenario.TWO_PHASE_COPPER: 
+            params['temperature'] += 273.15
+        
         channel = bot.get_channel(interaction.channel_id)
         simulation = MAPPING[scenario]
         message = await interaction.channel.send(content="Running the simulation... Give me a bit of time :)")
@@ -122,7 +147,7 @@ def main():
         animation_path = simulation.render(dump_file_path, renderer=RENDERERS[renderer])
 
         file = discord.File(animation_path.name, filename=animation_path.name)
-        description = simulation.get_description({"temperature": param_responses.result()['temperature']})
+        description = simulation.get_description(params)
         await channel.send(f"Your render is done <@{interaction.user.id}>! {description}", file=file)
         dump_file_path.unlink()
         animation_path.unlink()

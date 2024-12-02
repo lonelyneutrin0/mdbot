@@ -16,6 +16,9 @@ import ffmpeg
 
 
 def to_thread(func: typing.Callable) -> typing.Coroutine:
+    """
+    A decorator to run functions asynchronously 
+    """
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         return await asyncio.to_thread(func, *args, **kwargs)
@@ -37,8 +40,10 @@ class AvailableRenderer(Enum):
 @dataclass
 class Simulation(ABC):
     
+    # The restrictions imposed on parameters. It is a dictionary of string-keys and tuple values. Defaults to an empty dictionary 
     restrictions: Dict[str, Tuple[float, float]]=field(default_factory=dict)
 
+    # Required functions that have to be defined for classes that inherit Simulation
     @abstractmethod
     def get_description(self, values: dict) -> str:
 
@@ -93,7 +98,11 @@ class TwoPhaseCopper(Simulation):
 
         pipeline = ovito.io.import_file(path)
         data_initial = pipeline.compute(1)
+
+        # Store the energies of each particle initially
         energies = np.array(data_initial.particles["c_ke"][...])
+
+        # Apply a color map to the particles, start_value and end_value tuned empirically
         pipeline.modifiers.append(ovito.modifiers.ColorCodingModifier(
           property = 'c_ke',
           gradient = ovito.modifiers.ColorCodingModifier.Magma(),
